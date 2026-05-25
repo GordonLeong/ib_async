@@ -1,0 +1,96 @@
+# ib_async
+
+> Python sync/async client for Interactive Brokers TWS and IB Gateway.
+
+## Identity
+
+- **Name**: ib_async
+- **Version**: 2.1.0 (analyzed)
+- **Language**: Python
+- **License**: BSD
+- **Install**: `pip install ib_async`
+
+## What It Does
+
+`ib_async` wraps the Interactive Brokers socket protocol in a higher-level Python API that works in both blocking and asyncio styles. It keeps local state (positions, orders, account values, tickers) synchronized with TWS or IB Gateway while requests are in flight. You use it to connect to IBKR, qualify contracts, request market/account data, and place/manage orders without manually handling callback plumbing.
+
+## When to Use / When NOT to Use
+
+**Use when**:
+- You need Python automation against TWS/IB Gateway for market data, order routing, or account monitoring.
+- You want both sync and async request styles from the same API surface.
+- You need event-driven updates (`pendingTickersEvent`, `orderStatusEvent`, etc.) without writing your own network loop.
+
+**Do not use when**:
+- You need broker-agnostic trading APIs; this package is IBKR-specific.
+- You cannot maintain a running TWS/IB Gateway session.
+- You need ultra-short-lived fire-and-forget socket sessions (IB protocol favors long-lived connections).
+
+## Core Concepts (Know Before Using)
+
+- **IB** — Main facade class that exposes requests, state, and events.
+- **Contract** — Instrument descriptor (`Stock`, `Forex`, `Future`, `Option`, etc.) used in every market/order request.
+- **Ticker / BarDataList / Trade** — Live objects updated in place as new data arrives.
+- **Blocking vs Async methods** — Most requests have sync and `*Async` variants.
+- **Event loop rule** — Do not block with `time.sleep`; use `ib.sleep()` so message handling continues.
+- **Request error policy** — `IB.RaiseRequestErrors` controls whether request failures raise `RequestError` or return empty results.
+
+## Primary Usage
+
+```python
+from ib_async import IB, Stock, util
+
+# 1) Create the main API object.
+ib = IB()
+
+# 2) Connect to TWS (typically 7497) or IB Gateway (typically 4001).
+ib.connect("127.0.0.1", 7497, clientId=1)
+
+try:
+    # 3) Build a contract and qualify it to resolve identifiers like conId.
+    contract = Stock("AAPL", "SMART", "USD")
+    ib.qualifyContracts(contract)
+
+    # 4) Request a live market data subscription.
+    ticker = ib.reqMktData(contract, "", False, False)
+
+    # 5) Keep the framework spinning while waiting for updates.
+    ib.sleep(2)
+    print("last:", ticker.last, "bid:", ticker.bid, "ask:", ticker.ask)
+
+    # 6) Request historical bars and convert to a DataFrame (if pandas installed).
+    bars = ib.reqHistoricalData(
+        contract,
+        endDateTime="",
+        durationStr="5 D",
+        barSizeSetting="1 hour",
+        whatToShow="TRADES",
+        useRTH=True,
+    )
+    df = util.df(bars)
+    print(df.tail())
+finally:
+    # 7) Disconnect cleanly when done.
+    ib.disconnect()
+```
+
+## Key Capabilities
+
+- Connect synchronously or asynchronously (`connect`, `connectAsync`) and start requests only after API readiness.
+- Subscribe to streaming market data and consume updates from mutable ticker objects (`reqMktData`, `pendingTickersEvent`).
+- Request historical bars repeatedly for backfill workflows (`reqHistoricalData` looping by oldest timestamp).
+- Place and track orders with stateful `Trade` updates (`placeOrder`, `orderStatusEvent`, `execDetailsEvent`).
+- Pull account/portfolio state snapshots and ongoing updates (`accountSummary`, `positions`, `pnl`).
+- *Toggle strict request failure behavior for robust automation (`RaiseRequestErrors` + `RequestError`).
+- *Integrate with GUI loops like Qt/Tk without thread-heavy callback glue (`util.useQt`, Tk example).
+- *Access non-obvious IBKR data surfaces such as scanner feeds, news, and WSH events.
+
+## Detail Files
+
+- `llms-full/use-case-connect-and-fetch-data.md` — Connect, qualify a contract, fetch live + historical market data.
+- `llms-full/use-case-place-and-monitor-orders.md` — Submit orders and track fills/status via trade objects and events.
+- `llms-full/use-case-run-async-workflow.md` — Build an asyncio-native app with `connectAsync` and `*Async` methods.
+- `llms-full/capabilities.md` — High-value capabilities that are easy to miss in a quick README pass.
+- `llms-full/cookbook.md` — Copy-paste recipes for common micro-tasks.
+- `llms-full/antipatterns.md` — Common failure modes and concrete fixes.
+- `llms-full/integrations.md` — Qt/Tk loop integration patterns and constraints.
